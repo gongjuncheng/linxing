@@ -39,7 +39,7 @@ jobs:
           ./gradlew assembleDebug
 
       - name: 上传 APK 安装包
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4   # ← 这里从 v3 改成了 v4
         with:
           name: 邻星安装包
           path: android/app/build/outputs/apk/debug/app-debug.apk
