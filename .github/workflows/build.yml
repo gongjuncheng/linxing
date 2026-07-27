@@ -23,14 +23,16 @@ jobs:
           npx cap init 邻星 com.linxing.app --web-dir=www
           npx cap add android
 
-      # -------- 生成自定义图标（去掉 --force） --------
+      # -------- 生成自定义图标（复制到 assets/） --------
       - name: 生成自定义图标
         run: |
           echo "🔍 检查 resources/icon.png 是否存在..."
           if [ -f "resources/icon.png" ]; then
-            echo "✅ 找到 resources/icon.png，正在生成图标..."
+            echo "✅ 找到 resources/icon.png，准备生成图标..."
+            mkdir -p assets
+            cp resources/icon.png assets/icon.png
             npm install @capacitor/assets
-            npx capacitor-assets generate --asset-path ./resources --iconBackgroundColor '#fdf8f0' --splashBackgroundColor '#fdf8f0'
+            npx capacitor-assets generate --iconBackgroundColor '#fdf8f0' --splashBackgroundColor '#fdf8f0'
             echo "📂 生成的 Android 图标文件夹："
             ls -la android/app/src/main/res/mipmap-* || echo "（请检查图片尺寸是否为 1024x1024）"
           else
