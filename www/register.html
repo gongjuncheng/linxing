@@ -1,0 +1,318 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <title>注册 · 邻星</title>
+    <link rel="stylesheet" href="./css/style.css" />
+    <script type="importmap">
+        {
+            "imports": {
+                "@supabase/supabase-js": "https://esm.sh/@supabase/supabase-js@2"
+            }
+        }
+    </script>
+</head>
+<body>
+    <div id="app">
+        <div class="logo">🌙 邻星</div>
+        <div class="sub">结交新的好朋友</div>
+
+        <!-- 注册表单 -->
+        <div id="register-form">
+            <div class="form-group">
+                <label>邮箱地址</label>
+                <input type="email" id="reg-email" placeholder="your@email.com" />
+            </div>
+            <div class="form-group">
+                <label>密码（至少6位）</label>
+                <input type="password" id="reg-password" placeholder="设置密码" />
+            </div>
+            <div class="form-group">
+                <label>昵称（展示用）</label>
+                <input type="text" id="reg-display-name" placeholder="你的邻星昵称" maxlength="20" />
+            </div>
+            <div class="form-group">
+                <label>自定义ID（用于搜索）</label>
+                <input type="text" id="reg-username" placeholder="如: xiaoxing_2026" maxlength="20" />
+            </div>
+            <div class="form-group">
+                <label>出生日期</label>
+                <div class="row-3">
+                    <input type="number" id="reg-year" placeholder="年" min="1900" max="2099" />
+                    <select id="reg-month">
+                        <option value="">月</option>
+                        <option value="1">1</option><option value="2">2</option><option value="3">3</option>
+                        <option value="4">4</option><option value="5">5</option><option value="6">6</option>
+                        <option value="7">7</option><option value="8">8</option><option value="9">9</option>
+                        <option value="10">10</option><option value="11">11</option><option value="12">12</option>
+                    </select>
+                    <select id="reg-day">
+                        <option value="">日</option>
+                        <option value="1">1</option><option value="2">2</option><option value="3">3</option>
+                        <option value="4">4</option><option value="5">5</option><option value="6">6</option>
+                        <option value="7">7</option><option value="8">8</option><option value="9">9</option>
+                        <option value="10">10</option><option value="11">11</option><option value="12">12</option>
+                        <option value="13">13</option><option value="14">14</option><option value="15">15</option>
+                        <option value="16">16</option><option value="17">17</option><option value="18">18</option>
+                        <option value="19">19</option><option value="20">20</option><option value="21">21</option>
+                        <option value="22">22</option><option value="23">23</option><option value="24">24</option>
+                        <option value="25">25</option><option value="26">26</option><option value="27">27</option>
+                        <option value="28">28</option><option value="29">29</option><option value="30">30</option>
+                        <option value="31">31</option>
+                    </select>
+                </div>
+            </div>
+            <div class="form-group">
+                <label>所在地区</label>
+                <select id="reg-country">
+                    <option value="">请选择国家</option>
+                    <option value="中国">中国</option>
+                    <option value="美国">美国</option>
+                    <option value="英国">英国</option>
+                    <option value="日本">日本</option>
+                    <option value="韩国">韩国</option>
+                    <option value="法国">法国</option>
+                    <option value="德国">德国</option>
+                    <option value="加拿大">加拿大</option>
+                    <option value="澳大利亚">澳大利亚</option>
+                    <option value="其他">其他</option>
+                </select>
+            </div>
+            <div class="form-group hidden" id="province-group">
+                <label>省份</label>
+                <select id="reg-province"><option value="">请选择省份</option></select>
+            </div>
+            <div class="form-group hidden" id="city-group">
+                <label>城市</label>
+                <select id="reg-city"><option value="">请选择城市</option></select>
+            </div>
+
+            <div class="agree-check">
+                <input type="checkbox" id="agree-terms" />
+                <label for="agree-terms">
+                    我已阅读并同意 <a href="./terms.html" target="_blank">《用户协议》</a> 和 <a href="./privacy.html" target="_blank">《隐私政策》</a>
+                    <span class="error-text" id="agree-error" style="display:none;">请先同意用户协议和隐私政策</span>
+                </label>
+            </div>
+
+            <button id="btn-register">注册并发送验证邮件 ✉️</button>
+            <div class="link" id="switch-to-login">已有账号？去登录</div>
+            <div id="register-status"></div>
+        </div>
+    </div>
+
+    <script type="module">
+        import { supabase } from './js/supabase.js';
+        import { register, getSession } from './js/auth.js';
+        import { chinaData } from './js/config.js';
+
+        // DOM 元素
+        const emailInput = document.getElementById('reg-email');
+        const passwordInput = document.getElementById('reg-password');
+        const displayNameInput = document.getElementById('reg-display-name');
+        const usernameInput = document.getElementById('reg-username');
+        const yearInput = document.getElementById('reg-year');
+        const monthSelect = document.getElementById('reg-month');
+        const daySelect = document.getElementById('reg-day');
+        const countrySelect = document.getElementById('reg-country');
+        const provinceSelect = document.getElementById('reg-province');
+        const citySelect = document.getElementById('reg-city');
+        const provinceGroup = document.getElementById('province-group');
+        const cityGroup = document.getElementById('city-group');
+        const agreeCheckbox = document.getElementById('agree-terms');
+        const agreeError = document.getElementById('agree-error');
+        const registerBtn = document.getElementById('btn-register');
+        const switchLogin = document.getElementById('switch-to-login');
+        const statusDiv = document.getElementById('register-status');
+
+        // 如果已经登录，直接跳转
+        const session = await getSession();
+        if (session) {
+            window.location.href = './main.html';
+        }
+
+        // ===== 省份城市联动 =====
+        function populateProvinces() {
+            const provinces = Object.keys(chinaData);
+            provinceSelect.innerHTML = '<option value="">请选择省份</option>';
+            provinces.forEach(p => {
+                const o = document.createElement('option');
+                o.value = p;
+                o.textContent = p;
+                provinceSelect.appendChild(o);
+            });
+            citySelect.innerHTML = '<option value="">请先选择省份</option>';
+            cityGroup.classList.add('hidden');
+        }
+        populateProvinces();
+
+        provinceSelect.addEventListener('change', () => {
+            const province = provinceSelect.value;
+            if (!province || !chinaData[province]) {
+                citySelect.innerHTML = '<option value="">请先选择省份</option>';
+                cityGroup.classList.add('hidden');
+                return;
+            }
+            citySelect.innerHTML = '<option value="">请选择城市</option>';
+            chinaData[province].forEach(c => {
+                const o = document.createElement('option');
+                o.value = c;
+                o.textContent = c;
+                citySelect.appendChild(o);
+            });
+            cityGroup.classList.remove('hidden');
+        });
+
+        countrySelect.addEventListener('change', () => {
+            if (countrySelect.value === '中国') {
+                provinceGroup.classList.remove('hidden');
+                populateProvinces();
+            } else {
+                provinceGroup.classList.add('hidden');
+                cityGroup.classList.add('hidden');
+                provinceSelect.value = '';
+                citySelect.innerHTML = '<option value="">请先选择省份</option>';
+            }
+        });
+
+        // ===== 注册 =====
+        registerBtn.addEventListener('click', async () => {
+            if (!agreeCheckbox.checked) {
+                agreeError.style.display = 'block';
+                statusDiv.textContent = '';
+                return;
+            }
+            agreeError.style.display = 'none';
+
+            const email = emailInput.value.trim();
+            const password = passwordInput.value.trim();
+            const displayName = displayNameInput.value.trim();
+            const username = usernameInput.value.trim();
+            const year = yearInput.value.trim();
+            const month = monthSelect.value;
+            const day = daySelect.value;
+            const country = countrySelect.value;
+            const province = provinceSelect.value;
+            const city = citySelect.value;
+
+            // 组合地区
+            let location = '';
+            if (country) {
+                location = country;
+                if (country === '中国' && province) {
+                    location += ' ' + province;
+                    if (city) location += ' ' + city;
+                }
+            }
+
+            // 基本校验
+            if (!email || password.length < 6) {
+                statusDiv.textContent = '⚠️ 邮箱和密码（≥6位）必填';
+                return;
+            }
+            if (!displayName) {
+                statusDiv.textContent = '⚠️ 请填写昵称';
+                return;
+            }
+            if (!username) {
+                statusDiv.textContent = '⚠️ 请填写自定义ID';
+                return;
+            }
+            if (!/^[a-zA-Z0-9_]+$/.test(username)) {
+                statusDiv.textContent = '⚠️ 自定义ID只能包含字母、数字、下划线';
+                return;
+            }
+
+            // 日期校验
+            const y = parseInt(year),
+                m = parseInt(month),
+                d = parseInt(day);
+            if (isNaN(y) || y < 1900 || y > 2099 || isNaN(m) || m < 1 || m > 12 || isNaN(d) || d < 1 || d > 31) {
+                statusDiv.textContent = '⚠️ 请填写完整有效的出生日期';
+                return;
+            }
+            const dateObj = new Date(y, m - 1, d);
+            if (dateObj.getFullYear() !== y || dateObj.getMonth() !== m - 1 || dateObj.getDate() !== d) {
+                statusDiv.textContent = '⚠️ 日期不合法';
+                return;
+            }
+            const birthday = `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+
+            // 检查 username 唯一性
+            const { data: existing } = await supabase
+                .from('profiles')
+                .select('username')
+                .eq('username', username)
+                .maybeSingle();
+            if (existing) {
+                statusDiv.textContent = '⚠️ 这个ID已被占用，请换一个';
+                return;
+            }
+
+            statusDiv.textContent = '⏳ 发送验证邮件...';
+            registerBtn.disabled = true;
+
+            try {
+                const { user } = await register(email, password, {
+                    display_name: displayName,
+                    username: username,
+                    birthday: birthday,
+                    location: location
+                });
+
+                // 写入 profiles（使用 upsert 确保数据存在）
+                const { error: upsertError } = await supabase
+                    .from('profiles')
+                    .upsert({
+                        id: user.id,
+                        display_name: displayName,
+                        username: username,
+                        birthday: birthday,
+                        location: location
+                    }, { onConflict: 'id' });
+
+                if (upsertError) {
+                    console.error('保存资料失败:', upsertError);
+                    statusDiv.textContent = '⚠️ 注册成功但资料保存失败，请联系客服';
+                }
+
+                // 清空表单
+                emailInput.value = '';
+                passwordInput.value = '';
+                displayNameInput.value = '';
+                usernameInput.value = '';
+                yearInput.value = '';
+                monthSelect.value = '';
+                daySelect.value = '';
+                countrySelect.value = '';
+                provinceSelect.value = '';
+                citySelect.innerHTML = '<option value="">请先选择省份</option>';
+                cityGroup.classList.add('hidden');
+                provinceGroup.classList.add('hidden');
+                agreeCheckbox.checked = false;
+
+                statusDiv.textContent = '📧 验证邮件已发送，请确认后登录';
+                // 跳转到登录页
+                setTimeout(() => {
+                    window.location.href = './login.html';
+                }, 2000);
+
+            } catch (error) {
+                statusDiv.textContent = '❌ 注册失败：' + error.message;
+            } finally {
+                registerBtn.disabled = false;
+            }
+        });
+
+        switchLogin.addEventListener('click', () => {
+            window.location.href = './login.html';
+        });
+
+        // 回车键注册
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') registerBtn.click();
+        });
+    </script>
+</body>
+</html>
