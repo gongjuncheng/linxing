@@ -1,0 +1,404 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0" />
+    <title>邻星 · 我的好友</title>
+    <link rel="stylesheet" href="./css/style.css" />
+</head>
+<body>
+    <div id="app">
+        <div class="logo">🌙 邻星</div>
+        <div class="sub">结交新的好朋友</div>
+
+        <!-- 主界面 -->
+        <div id="main-box">
+            <!-- 顶部栏 -->
+            <div class="top-bar">
+                <span class="greeting">🌙 欢迎 <strong id="greeting-name">居民</strong></span>
+                <div class="actions">
+                    <button class="icon-btn" id="open-add-friend">➕<span id="friend-request-badge" class="badge-dot hidden">0</span></button>
+                    <button class="icon-btn" id="open-settings" onclick="window.location.href='./setting.html'">⚙️</button>
+                    <button class="secondary small" id="btn-logout" style="padding:6px 14px;font-size:13px;">退出</button>
+                </div>
+            </div>
+
+            <!-- 好友列表 -->
+            <div class="section">
+                <div class="card-title">👫 我的好友</div>
+                <div id="friends-list">
+                    <div class="empty-tip">加载中...</div>
+                </div>
+            </div>
+
+            <div id="main-status" style="margin-top:16px;color:#b0a094;font-size:13px;text-align:center;"></div>
+        </div>
+
+        <!-- 好友管理模态框 -->
+        <div id="add-friend-modal" class="modal-overlay hidden">
+            <div class="modal-box">
+                <div class="modal-title">💌 好友管理</div>
+                <div class="modal-tabs">
+                    <button class="active" data-tab="requests">好友请求</button>
+                    <button data-tab="search">添加好友</button>
+                </div>
+                <div class="modal-content">
+                    <div id="modal-requests-list">
+                        <div class="empty-tip">暂无好友请求</div>
+                    </div>
+                    <div id="modal-search-panel" class="hidden">
+                        <div class="search-box">
+                            <input type="text" id="modal-search-input" placeholder="输入ID或昵称" />
+                            <button id="modal-search-btn" class="small" style="padding:11px 18px;">搜索</button>
+                        </div>
+                        <div id="modal-search-results">
+                            <div class="empty-tip">输入关键词搜索用户</div>
+                        </div>
+                    </div>
+                </div>
+                <button id="modal-close-btn" class="secondary" style="margin-top:16px;">关闭</button>
+            </div>
+        </div>
+    </div>
+
+    <script type="module">
+        import { supabase } from './js/supabase.js';
+        import { getSession, logout } from './js/auth.js';
+        import {
+            loadFriends,
+            getPendingRequestCount,
+            loadPendingRequests,
+            searchUsers,
+            sendFriendRequest,
+            handleFriendRequest,
+            checkFriendStatus
+        } from './js/friend.js';
+
+        // ===== DOM 元素 =====
+        const greetingName = document.getElementById('greeting-name');
+        const friendsList = document.getElementById('friends-list');
+        const mainStatus = document.getElementById('main-status');
+        const logoutBtn = document.getElementById('btn-logout');
+        const openAddFriendBtn = document.getElementById('open-add-friend');
+        const friendBadge = document.getElementById('friend-request-badge');
+
+        const modal = document.getElementById('add-friend-modal');
+        const modalCloseBtn = document.getElementById('modal-close-btn');
+        const modalTabs = document.querySelectorAll('.modal-tabs button');
+        const modalRequestsList = document.getElementById('modal-requests-list');
+        const modalSearchPanel = document.getElementById('modal-search-panel');
+        const modalSearchInput = document.getElementById('modal-search-input');
+        const modalSearchBtn = document.getElementById('modal-search-btn');
+        const modalResults = document.getElementById('modal-search-results');
+
+        // ===== 当前用户 =====
+        let currentUser = null;
+
+        // ===== 初始化 =====
+        async function init() {
+            // 检查登录状态
+            const user = await getSession();
+            if (!user) {
+                window.location.href = './login.html';
+                return;
+            }
+            currentUser = user;
+
+            // 显示昵称
+            const name = user.user_metadata?.display_name || user.email?.split('@')[0] || '居民';
+            greetingName.textContent = name;
+
+            // 加载数据
+            await loadFriendsList();
+            await updateBadge();
+
+            // 监听认证状态变化（其他标签页退出登录时同步）
+            supabase.auth.onAuthStateChange((event, session) => {
+                if (event === 'SIGNED_OUT') {
+                    window.location.href = './login.html';
+                }
+            });
+        }
+
+        // ===== 加载好友列表 =====
+        async function loadFriendsList() {
+            try {
+                const friends = await loadFriends(currentUser.id);
+                if (!friends || friends.length === 0) {
+                    friendsList.innerHTML = '<div class="empty-tip">还没有好友，点击 ➕ 添加</div>';
+                    return;
+                }
+
+                let html = '';
+                friends.forEach(friend => {
+                    const avatar = friend.avatar_url
+                        ? `<img src="${friend.avatar_url}" style="width:40px;height:40px;border-radius:50%;object-fit:cover;">`
+                        : `<div class="user-avatar">${(friend.display_name || friend.username || '?')[0]}</div>`;
+                    html += `
+                        <div class="user-row" onclick="window.openChat('${friend.id}')">
+                            <div class="user-info">
+                                ${avatar}
+                                <div>
+                                    <div class="user-name">${friend.display_name || friend.username}</div>
+                                    <div class="user-id">ID: ${friend.username} · No.${friend.user_no}</div>
+                                    ${friend.location ? `<div class="user-location">📍 ${friend.location}</div>` : ''}
+                                </div>
+                            </div>
+                            <span style="color:#7bc0a4;font-size:13px;">💬 聊天</span>
+                        </div>
+                    `;
+                });
+                friendsList.innerHTML = html;
+
+            } catch (error) {
+                console.error('加载好友列表失败:', error);
+                friendsList.innerHTML = '<div class="empty-tip">加载失败，请刷新重试</div>';
+            }
+        }
+
+        // ===== 更新红点 =====
+        async function updateBadge() {
+            try {
+                const count = await getPendingRequestCount(currentUser.id);
+                if (count > 0) {
+                    friendBadge.textContent = count > 9 ? '9+' : count;
+                    friendBadge.classList.remove('hidden');
+                } else {
+                    friendBadge.classList.add('hidden');
+                }
+            } catch (error) {
+                console.error('更新红点失败:', error);
+                friendBadge.classList.add('hidden');
+            }
+        }
+
+        // ===== 打开好友管理模态框 =====
+        openAddFriendBtn.addEventListener('click', () => {
+            modal.classList.remove('hidden');
+            // 默认显示好友请求标签
+            modalTabs.forEach(t => t.classList.remove('active'));
+            document.querySelector('[data-tab="requests"]').classList.add('active');
+            document.getElementById('modal-requests-list').classList.remove('hidden');
+            document.getElementById('modal-search-panel').classList.add('hidden');
+            loadModalRequests();
+        });
+
+        modalCloseBtn.addEventListener('click', () => modal.classList.add('hidden'));
+        modal.addEventListener('click', (e) => {
+            if (e.target === modal) modal.classList.add('hidden');
+        });
+
+        // ===== 模态框标签切换 =====
+        modalTabs.forEach(tab => {
+            tab.addEventListener('click', () => {
+                modalTabs.forEach(t => t.classList.remove('active'));
+                tab.classList.add('active');
+                const target = tab.dataset.tab;
+                if (target === 'requests') {
+                    document.getElementById('modal-requests-list').classList.remove('hidden');
+                    document.getElementById('modal-search-panel').classList.add('hidden');
+                    loadModalRequests();
+                } else {
+                    document.getElementById('modal-requests-list').classList.add('hidden');
+                    document.getElementById('modal-search-panel').classList.remove('hidden');
+                    modalResults.innerHTML = '<div class="empty-tip">输入关键词搜索用户</div>';
+                }
+            });
+        });
+
+        // ===== 加载好友请求 =====
+        async function loadModalRequests() {
+            try {
+                const requests = await loadPendingRequests(currentUser.id);
+                if (!requests || requests.length === 0) {
+                    modalRequestsList.innerHTML = '<div class="empty-tip">🎉 暂无好友请求</div>';
+                    return;
+                }
+
+                let html = '';
+                requests.forEach(req => {
+                    const from = req.sender;
+                    if (!from) return;
+                    const avatar = from.avatar_url
+                        ? `<img src="${from.avatar_url}" style="width:40px;height:40px;border-radius:50%;object-fit:cover;">`
+                        : `<div class="user-avatar">${(from.display_name || from.username || '?')[0]}</div>`;
+                    html += `
+                        <div class="result-item">
+                            <div class="user-info">
+                                ${avatar}
+                                <div>
+                                    <div class="user-name">${from.display_name || from.username}</div>
+                                    <div class="user-id">ID: ${from.username} · No.${from.user_no}</div>
+                                    ${from.location ? `<div class="user-location">📍 ${from.location}</div>` : ''}
+                                </div>
+                            </div>
+                            <div class="btn-group">
+                                <button class="success small" data-request-id="${req.id}" data-action="accept">✅ 同意</button>
+                                <button class="danger small" data-request-id="${req.id}" data-action="reject">✖️ 拒绝</button>
+                            </div>
+                        </div>
+                    `;
+                });
+                modalRequestsList.innerHTML = html;
+
+                // 绑定按钮事件
+                modalRequestsList.querySelectorAll('[data-request-id]').forEach(btn => {
+                    btn.addEventListener('click', async (e) => {
+                        const requestId = btn.dataset.requestId;
+                        const action = btn.dataset.action;
+                        await handleRequest(requestId, action);
+                    });
+                });
+
+            } catch (error) {
+                console.error('加载好友请求失败:', error);
+                modalRequestsList.innerHTML = '<div class="empty-tip">加载失败，请重试</div>';
+            }
+        }
+
+        // ===== 处理请求 =====
+        async function handleRequest(requestId, action) {
+            try {
+                const result = await handleFriendRequest(requestId, action);
+                if (result.action === 'accepted') {
+                    alert('✅ 已同意好友请求！');
+                } else {
+                    alert('已拒绝该请求');
+                }
+                // 刷新列表
+                await loadModalRequests();
+                await loadFriendsList();
+                await updateBadge();
+            } catch (error) {
+                alert('操作失败：' + error.message);
+            }
+        }
+
+        // ===== 搜索用户 =====
+        modalSearchBtn.addEventListener('click', async () => {
+            const keyword = modalSearchInput.value.trim();
+            if (!keyword) {
+                modalResults.innerHTML = '<div class="empty-tip">请输入关键词</div>';
+                return;
+            }
+
+            modalResults.innerHTML = '<div class="empty-tip">搜索中...</div>';
+
+            try {
+                const users = await searchUsers(keyword, currentUser.id);
+                if (!users || users.length === 0) {
+                    modalResults.innerHTML = '<div class="empty-tip">未找到匹配的用户</div>';
+                    return;
+                }
+
+                // 检查每个用户的好友状态
+                const results = await Promise.all(users.map(async (u) => {
+                    const status = await checkFriendStatus(currentUser.id, u.id);
+                    return { ...u, friendStatus: status };
+                }));
+
+                let html = '';
+                await Promise.all(results.map(async (u) => {
+                    const status = u.friendStatus;
+                    let actionHtml = '';
+                    if (status) {
+                        if (status.status === 'accepted') {
+                            actionHtml = '<span style="color:#7bc0a4;font-size:13px;">✅ 好友</span>';
+                        } else if (status.status === 'pending') {
+                            // 判断是谁发的
+                            const { data } = await supabase
+                                .from('friends')
+                                .select('user_id')
+                                .eq('id', status.id)
+                                .single();
+                            if (data && data.user_id === currentUser.id) {
+                                actionHtml = '<span style="color:#b0a094;font-size:13px;">⏳ 已发送，等待处理</span>';
+                            } else {
+                                actionHtml = '<span style="color:#b0a094;font-size:13px;">📩 对方已发送，请去“好友请求”处理</span>';
+                            }
+                        } else if (status.status === 'rejected') {
+                            actionHtml = '<span style="color:#e8a09c;font-size:13px;">❌ 已拒绝</span>';
+                        }
+                    } else {
+                        actionHtml = `<button class="success small" data-target-id="${u.id}">➕ 添加好友</button>`;
+                    }
+
+                    const avatar = u.avatar_url
+                        ? `<img src="${u.avatar_url}" style="width:40px;height:40px;border-radius:50%;object-fit:cover;">`
+                        : `<div class="user-avatar">${(u.display_name || u.username || '?')[0]}</div>`;
+                    html += `
+                        <div class="result-item">
+                            <div class="user-info">
+                                ${avatar}
+                                <div>
+                                    <div class="user-name">${u.display_name || u.username}</div>
+                                    <div class="user-id">ID: ${u.username} · No.${u.user_no}</div>
+                                    ${u.location ? `<div class="user-location">📍 ${u.location}</div>` : ''}
+                                </div>
+                            </div>
+                            <div>${actionHtml}</div>
+                        </div>
+                    `;
+                }));
+                modalResults.innerHTML = html;
+
+                // 绑定添加好友按钮
+                modalResults.querySelectorAll('[data-target-id]').forEach(btn => {
+                    btn.addEventListener('click', async () => {
+                        const targetId = btn.dataset.targetId;
+                        await sendFriendRequestHandler(targetId);
+                    });
+                });
+
+            } catch (error) {
+                console.error('搜索失败:', error);
+                modalResults.innerHTML = '<div class="empty-tip">搜索出错，请重试</div>';
+            }
+        });
+
+        // ===== 发送好友请求 =====
+        async function sendFriendRequestHandler(targetId) {
+            try {
+                const result = await sendFriendRequest(currentUser.id, targetId);
+                if (result.already === 'accepted') {
+                    alert('已经是好友了');
+                } else if (result.already === 'pending') {
+                    alert('已发送过请求，请等待对方处理');
+                } else {
+                    alert('✅ 好友请求已发送！');
+                }
+                // 刷新搜索结果
+                modalSearchBtn.click();
+                await updateBadge();
+            } catch (error) {
+                alert('发送失败：' + error.message);
+            }
+        }
+
+        // ===== 退出登录 =====
+        logoutBtn.addEventListener('click', async () => {
+            try {
+                await logout();
+                window.location.href = './login.html';
+            } catch (error) {
+                alert('退出失败：' + error.message);
+            }
+        });
+
+        // ===== 打开聊天（暴露到全局，供 onclick 调用） =====
+        window.openChat = function(friendId) {
+            // 获取好友昵称
+            const row = document.querySelector(`.user-row[onclick*="${friendId}"]`);
+            let name = '好友';
+            if (row) {
+                const nameEl = row.querySelector('.user-name');
+                if (nameEl) name = nameEl.textContent;
+            }
+            window.location.href = `./chat.html?userId=${friendId}&userName=${encodeURIComponent(name)}`;
+        };
+
+        // ===== 启动 =====
+        init();
+    </script>
+</body>
+</html>
