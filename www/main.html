@@ -73,6 +73,7 @@
             handleFriendRequest,
             checkFriendStatus
         } from './js/friend.js';
+        import { initPush } from './js/push.js';
 
         // ===== DOM 元素 =====
         const greetingName = document.getElementById('greeting-name');
@@ -103,6 +104,9 @@
                 return;
             }
             currentUser = user;
+
+            // 初始化极光推送（注册设备 + 设置别名）
+            initPush(currentUser);
 
             // 显示昵称
             const name = user.user_metadata?.display_name || user.email?.split('@')[0] || '居民';
