@@ -1,0 +1,30 @@
+# Node
+node_modules/
+npm-debug.log*
+yarn-error.log
+
+# Capacitor / Android
+android/.gradle/
+android/build/
+android/app/build/
+android/captures/
+android/local.properties
+android/**/*.iml
+android/.idea/
+*.keystore
+*.jks
+android.keystore
+
+# 原生工程的产物（由 cap sync 生成，无需入库）
+android/app/src/main/assets/public
+
+# 编辑器 / 系统
+.DS_Store
+*.log
+.idea/
+.vscode/
+*.swp
+
+# 密钥 / 本地配置（不要提交）
+.env
+keys/
