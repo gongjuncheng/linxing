@@ -46,7 +46,6 @@ dependencies {
     implementation 'cn.jiguang.sdk.plugin:xiaomi:6.2.1'
     implementation 'cn.jiguang.sdk.plugin:oppo:6.2.1'
     implementation 'cn.jiguang.sdk.plugin:vivo:6.2.1'
-    implementation 'cn.jiguang.sdk.plugin:honor:6.2.1'
     implementation 'cn.jiguang.sdk.plugin:meizu:6.2.1'
     // 如需华为 / FCM 厂商通道，解除注释并参考极光文档配置
     // （华为需 agconnect-services.json + com.huawei.agconnect 插件；FCM 需 google-services.json）
