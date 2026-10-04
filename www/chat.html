@@ -1,0 +1,508 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0" />
+    <title>聊天 · 邻星</title>
+    <link rel="stylesheet" href="./css/style.css" />
+</head>
+<body>
+    <div id="app">
+        <div class="logo" style="font-size:20px;margin-bottom:4px;">🌙 邻星</div>
+
+        <!-- 聊天视图 -->
+        <div id="chat-view">
+            <div class="chat-header">
+                <button class="back-btn" id="chat-back">‹</button>
+                <span class="chat-with" id="chat-with-name">好友</span>
+                <span class="burn-status-label" id="burn-status-label"></span>
+            </div>
+            <div class="messages" id="chat-messages">
+                <div class="typing-bubble hidden" id="typing-bubble">✍️ 对方正在输入...</div>
+            </div>
+            <div class="chat-input">
+                <button class="plus-btn" id="plus-btn">➕</button>
+                <input type="text" id="chat-input-field" placeholder="输入消息..." />
+                <button id="chat-send-btn">发送</button>
+            </div>
+        </div>
+
+        <!-- 功能面板 -->
+        <div id="action-sheet" class="action-sheet-overlay hidden">
+            <div class="action-sheet">
+                <div class="handle"></div>
+                <div class="grid">
+                    <div class="item" id="sticker-entry"><div class="icon">📝</div><span class="label">小纸条</span></div>
+                    <div class="item" id="image-entry"><div class="icon">🖼️</div><span class="label">图片</span></div>
+                    <div class="item" id="video-entry"><div class="icon">🎬</div><span class="label">视频</span></div>
+                    <div class="item" id="burn-entry"><div class="icon">🔥</div><span class="label">阅后即焚</span></div>
+                    <div class="item" id="read-receipt-entry"><div class="icon">👁️</div><span class="label">已读回执</span></div>
+                </div>
+                <button class="close-btn" id="action-sheet-close">取消</button>
+            </div>
+        </div>
+
+        <!-- 隐藏的文件输入 -->
+        <input type="file" id="file-input" accept="image/*" />
+        <input type="file" id="video-input" accept="video/*" />
+
+        <!-- 小纸条对话框 -->
+        <div id="sticker-dialog" class="dialog-overlay hidden">
+            <div class="dialog-box">
+                <h3>📝 传个小纸条</h3>
+                <textarea id="sticker-content" placeholder="想对TA说什么？"></textarea>
+                <div class="btn-row">
+                    <button class="cancel" id="sticker-cancel">取消</button>
+                    <button class="send" id="sticker-send">发送纸条 ✉️</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- 阅后即焚对话框 -->
+        <div id="burn-dialog" class="dialog-overlay hidden">
+            <div class="dialog-box">
+                <h3>🔥 阅后即焚约定</h3>
+                <p>我们约定，我们之间的信息在对方已读后</p>
+                <div class="input-row">
+                    <input type="number" id="burn-seconds-input" min="1" value="5" />
+                    <span>秒后自动删除</span>
+                </div>
+                <p style="font-size:13px;color:#b0a094;">对方同意后生效，随时可撤销</p>
+                <div class="btn-row">
+                    <button class="cancel" id="burn-cancel">取消</button>
+                    <button class="send" id="burn-send">发送约定 ✉️</button>
+                </div>
+                <div id="burn-status" class="dialog-status"></div>
+            </div>
+        </div>
+
+        <!-- 已读回执对话框 -->
+        <div id="read-receipt-dialog" class="dialog-overlay hidden">
+            <div class="dialog-box">
+                <h3>👁️ 已读回执约定</h3>
+                <p>开启后，你们将能看到对方是否已读消息。</p>
+                <p style="font-size:13px;color:#b0a094;">对方同意后生效，随时可撤销</p>
+                <div class="btn-row">
+                    <button class="cancel" id="read-receipt-cancel">取消</button>
+                    <button class="send" id="read-receipt-send">发送约定 ✉️</button>
+                </div>
+                <div id="read-receipt-status" class="dialog-status"></div>
+            </div>
+        </div>
+
+        <!-- 图片预览 -->
+        <div id="image-preview" class="image-preview-overlay hidden">
+            <button class="close-preview" id="preview-close">✕</button>
+            <img id="preview-image" src="" alt="预览" />
+        </div>
+    </div>
+
+    <script type="module">
+        import { supabase } from './js/supabase.js';
+        import { getSession, logout } from './js/auth.js';
+        import { getUrlParams } from './js/ui-utils.js';
+        import {
+            initChat,
+            loadMessages,
+            markMessagesRead,
+            sendMessage,
+            cleanup
+        } from './js/chat-core.js';
+        import {
+            renderTextMessage,
+            renderStickerMessage,
+            renderMediaMessage,
+            renderSystemMessage
+        } from './js/messages.js';
+        import {
+            sendSticker,
+            markStickersRead
+        } from './js/stickers.js';
+        import {
+            uploadImage,
+            uploadVideo,
+            sendMediaMessage
+        } from './js/media.js';
+        import {
+            loadBurnAgreement,
+            sendBurnAgreement,
+            handleBurnAgreement,
+            loadReadReceiptAgreement,
+            sendReadReceiptAgreement,
+            handleReadReceiptAgreement,
+            getAgreementStatusText
+        } from './js/agreements.js';
+        import {
+            setupActionSheet,
+            setupStickerDialog,
+            setupBurnDialog,
+            setupReadReceiptDialog,
+            setupImagePreview
+        } from './js/chat-ui.js';
+
+        // ===== DOM 元素 =====
+        const chatBack = document.getElementById('chat-back');
+        const chatWithName = document.getElementById('chat-with-name');
+        const burnStatusLabel = document.getElementById('burn-status-label');
+        const chatMessages = document.getElementById('chat-messages');
+        const chatInput = document.getElementById('chat-input-field');
+        const chatSendBtn = document.getElementById('chat-send-btn');
+        const plusBtn = document.getElementById('plus-btn');
+        const actionSheet = document.getElementById('action-sheet');
+        const actionSheetClose = document.getElementById('action-sheet-close');
+        const stickerEntry = document.getElementById('sticker-entry');
+        const stickerDialog = document.getElementById('sticker-dialog');
+        const stickerContent = document.getElementById('sticker-content');
+        const stickerSend = document.getElementById('sticker-send');
+        const stickerCancel = document.getElementById('sticker-cancel');
+        const imageEntry = document.getElementById('image-entry');
+        const fileInput = document.getElementById('file-input');
+        const videoEntry = document.getElementById('video-entry');
+        const videoInput = document.getElementById('video-input');
+        const burnEntry = document.getElementById('burn-entry');
+        const burnDialog = document.getElementById('burn-dialog');
+        const burnSecondsInput = document.getElementById('burn-seconds-input');
+        const burnSend = document.getElementById('burn-send');
+        const burnCancel = document.getElementById('burn-cancel');
+        const burnStatus = document.getElementById('burn-status');
+        const readReceiptEntry = document.getElementById('read-receipt-entry');
+        const readReceiptDialog = document.getElementById('read-receipt-dialog');
+        const readReceiptSend = document.getElementById('read-receipt-send');
+        const readReceiptCancel = document.getElementById('read-receipt-cancel');
+        const readReceiptStatus = document.getElementById('read-receipt-status');
+
+        // ===== 状态 =====
+        let currentUser = null;
+        let friendId = null;
+        let friendName = null;
+        let chatApi = null;
+        let typingTimer = null;
+        let currentBurnAgreement = null;
+        let currentReadReceiptAgreement = null;
+
+        // ===== 初始化 =====
+        async function init() {
+            // 检查登录
+            const user = await getSession();
+            if (!user) {
+                window.location.href = './login.html';
+                return;
+            }
+            currentUser = user;
+
+            // 获取URL参数
+            const params = getUrlParams();
+            friendId = params.userId;
+            friendName = params.userName || '好友';
+
+            if (!friendId) {
+                alert('缺少好友ID');
+                window.location.href = './main.html';
+                return;
+            }
+
+            // 设置标题
+            chatWithName.textContent = friendName;
+
+            // 初始化聊天
+            chatApi = initChat(friendId, currentUser.id, chatMessages, {
+                onNewMessage: (msg) => {
+                    if (msg.media_url) {
+                        renderMediaMessage(msg, currentUser.id, chatMessages, false);
+                    } else if (msg.is_system) {
+                        renderSystemMessage(msg, currentUser.id, chatMessages, handleAgreementActionWrapper, handleAgreementActionWrapper);
+                    } else {
+                        renderTextMessage(msg, currentUser.id, chatMessages);
+                    }
+                    chatMessages.scrollTop = chatMessages.scrollHeight;
+                },
+                onNewSticker: (sticker) => {
+                    renderStickerMessage(sticker, currentUser.id, chatMessages);
+                    chatMessages.scrollTop = chatMessages.scrollHeight;
+                },
+                onAgreementUpdate: async (payload) => {
+                    if (payload.type === 'burn') {
+                        currentBurnAgreement = await loadBurnAgreement(friendId);
+                        updateBurnStatusLabel();
+                    } else if (payload.type === 'read_receipt') {
+                        currentReadReceiptAgreement = await loadReadReceiptAgreement(friendId);
+                    }
+                    loadMessages(friendId, chatMessages);
+                },
+                onTypingStart: (content) => {
+                    const bubble = document.getElementById('typing-bubble');
+                    bubble.textContent = `✍️ ${content}`;
+                    bubble.classList.remove('hidden');
+                },
+                onTypingEnd: () => {
+                    const bubble = document.getElementById('typing-bubble');
+                    bubble.classList.add('hidden');
+                }
+            });
+
+            // 加载约定
+            currentBurnAgreement = await loadBurnAgreement(friendId);
+            updateBurnStatusLabel();
+            currentReadReceiptAgreement = await loadReadReceiptAgreement(friendId);
+
+            // 标记小纸条已读
+            await markStickersRead(friendId, currentUser.id);
+
+            // 监听认证状态变化
+            supabase.auth.onAuthStateChange((event, session) => {
+                if (event === 'SIGNED_OUT') {
+                    window.location.href = './login.html';
+                }
+            });
+
+            // 设置UI
+            setupUI();
+        }
+
+        // ===== 更新阅后即焚状态标签 =====
+        function updateBurnStatusLabel() {
+            const text = getAgreementStatusText(currentBurnAgreement, 'burn');
+            burnStatusLabel.textContent = text;
+        }
+
+        // ===== 处理约定操作 =====
+        async function handleAgreementAction(agreementId, type, action) {
+            try {
+                if (type === 'burn') {
+                    await handleBurnAgreement(agreementId, action);
+                } else if (type === 'read_receipt') {
+                    await handleReadReceiptAgreement(agreementId, action);
+                }
+                // 刷新消息
+                await loadMessages(friendId, chatMessages);
+                // 更新约定状态
+                currentBurnAgreement = await loadBurnAgreement(friendId);
+                updateBurnStatusLabel();
+                currentReadReceiptAgreement = await loadReadReceiptAgreement(friendId);
+            } catch (error) {
+                alert('操作失败：' + error.message);
+            }
+        }
+
+        // 包装函数供系统消息使用
+        const handleAgreementActionWrapper = (agreementId, type) => {
+            // 用户点击按钮时，弹出选择
+            const action = confirm('同意该约定吗？') ? 'agree' : 'reject';
+            handleAgreementAction(agreementId, type, action);
+        };
+
+        // ===== 设置UI =====
+        function setupUI() {
+            // 设置功能面板
+            setupActionSheet(plusBtn, actionSheet, actionSheetClose);
+
+            // 设置小纸条
+            const stickerUI = setupStickerDialog(
+                stickerEntry, stickerDialog, stickerCancel, stickerSend, stickerContent
+            );
+            stickerSend.addEventListener('click', async () => {
+                const content = stickerUI.getContent();
+                if (!content) {
+                    alert('请输入内容');
+                    return;
+                }
+                try {
+                    const sticker = await sendSticker(friendId, content);
+                    renderStickerMessage(sticker, currentUser.id, chatMessages);
+                    chatMessages.scrollTop = chatMessages.scrollHeight;
+                    stickerUI.hide();
+                    // 广播
+                    if (chatApi._channel) {
+                        chatApi._channel.send({
+                            type: 'broadcast',
+                            event: 'new_sticker',
+                            payload: {
+                                sticker_id: sticker.id,
+                                from_user_id: currentUser.id,
+                                to_user_id: friendId
+                            }
+                        });
+                    }
+                } catch (error) {
+                    alert('发送失败：' + error.message);
+                }
+            });
+
+            // 设置图片上传
+            imageEntry.addEventListener('click', () => {
+                actionSheet.classList.add('hidden');
+                fileInput.click();
+            });
+            fileInput.addEventListener('change', async (e) => {
+                const file = e.target.files[0];
+                if (!file) return;
+                try {
+                    const url = await uploadImage(file);
+                    const msg = await sendMediaMessage(friendId, url, 'image');
+                    renderMediaMessage(msg, currentUser.id, chatMessages, false);
+                    chatMessages.scrollTop = chatMessages.scrollHeight;
+                    // 广播
+                    if (chatApi._channel) {
+                        chatApi._channel.send({
+                            type: 'broadcast',
+                            event: 'new_message',
+                            payload: {
+                                message_id: msg.id,
+                                from_user_id: currentUser.id,
+                                to_user_id: friendId
+                            }
+                        });
+                    }
+                } catch (error) {
+                    alert('图片发送失败：' + error.message);
+                }
+                fileInput.value = '';
+            });
+
+            // 设置视频上传
+            videoEntry.addEventListener('click', () => {
+                actionSheet.classList.add('hidden');
+                videoInput.click();
+            });
+            videoInput.addEventListener('change', async (e) => {
+                const file = e.target.files[0];
+                if (!file) return;
+                try {
+                    const url = await uploadVideo(file);
+                    const msg = await sendMediaMessage(friendId, url, 'video');
+                    renderMediaMessage(msg, currentUser.id, chatMessages, false);
+                    chatMessages.scrollTop = chatMessages.scrollHeight;
+                    if (chatApi._channel) {
+                        chatApi._channel.send({
+                            type: 'broadcast',
+                            event: 'new_message',
+                            payload: {
+                                message_id: msg.id,
+                                from_user_id: currentUser.id,
+                                to_user_id: friendId
+                            }
+                        });
+                    }
+                } catch (error) {
+                    alert('视频发送失败：' + error.message);
+                }
+                videoInput.value = '';
+            });
+
+            // 设置阅后即焚
+            const burnUI = setupBurnDialog(
+                burnEntry, burnDialog, burnCancel, burnSend, burnSecondsInput, burnStatus
+            );
+            burnSend.addEventListener('click', async () => {
+                const seconds = burnUI.getSeconds();
+                if (isNaN(seconds) || seconds < 1) {
+                    burnUI.setStatus('⚠️ 请输入有效秒数');
+                    return;
+                }
+                try {
+                    // 如果是已生效状态，则撤销
+                    if (currentBurnAgreement && currentBurnAgreement.status === 'accepted') {
+                        await handleBurnAgreement(currentBurnAgreement.id, 'revoke');
+                        currentBurnAgreement = await loadBurnAgreement(friendId);
+                        updateBurnStatusLabel();
+                        burnUI.setStatus('✅ 已撤销约定');
+                        burnUI.hide();
+                        return;
+                    }
+                    const msg = await sendBurnAgreement(friendId, seconds);
+                    renderSystemMessage(msg, currentUser.id, chatMessages, handleAgreementActionWrapper, handleAgreementActionWrapper);
+                    chatMessages.scrollTop = chatMessages.scrollHeight;
+                    currentBurnAgreement = await loadBurnAgreement(friendId);
+                    updateBurnStatusLabel();
+                    burnUI.setStatus('✅ 约定已发送');
+                    burnUI.hide();
+                } catch (error) {
+                    burnUI.setStatus('❌ ' + error.message);
+                }
+            });
+
+            // 设置已读回执
+            const readReceiptUI = setupReadReceiptDialog(
+                readReceiptEntry, readReceiptDialog, readReceiptCancel, readReceiptSend, readReceiptStatus
+            );
+            readReceiptSend.addEventListener('click', async () => {
+                try {
+                    if (currentReadReceiptAgreement && currentReadReceiptAgreement.status === 'accepted') {
+                        await handleReadReceiptAgreement(currentReadReceiptAgreement.id, 'revoke');
+                        currentReadReceiptAgreement = await loadReadReceiptAgreement(friendId);
+                        readReceiptUI.setStatus('✅ 已撤销约定');
+                        readReceiptUI.hide();
+                        return;
+                    }
+                    const msg = await sendReadReceiptAgreement(friendId);
+                    renderSystemMessage(msg, currentUser.id, chatMessages, handleAgreementActionWrapper, handleAgreementActionWrapper);
+                    chatMessages.scrollTop = chatMessages.scrollHeight;
+                    currentReadReceiptAgreement = await loadReadReceiptAgreement(friendId);
+                    readReceiptUI.setStatus('✅ 约定已发送');
+                    readReceiptUI.hide();
+                } catch (error) {
+                    readReceiptUI.setStatus('❌ ' + error.message);
+                }
+            });
+
+            // 设置图片预览
+            setupImagePreview(
+                document.getElementById('image-preview'),
+                document.getElementById('preview-image'),
+                document.getElementById('preview-close')
+            );
+
+            // 设置返回按钮
+            chatBack.addEventListener('click', () => {
+                cleanup();
+                window.location.href = './main.html';
+            });
+
+            // 设置发送按钮
+            chatSendBtn.addEventListener('click', async () => {
+                const content = chatInput.value.trim();
+                if (!content) return;
+
+                let isBurn = false;
+                let burnSeconds = 0;
+                if (currentBurnAgreement && currentBurnAgreement.status === 'accepted') {
+                    isBurn = true;
+                    burnSeconds = currentBurnAgreement.burn_seconds;
+                }
+
+                try {
+                    const msg = await sendMessage(friendId, content, isBurn, burnSeconds);
+                    renderTextMessage(msg, currentUser.id, chatMessages);
+                    chatMessages.scrollTop = chatMessages.scrollHeight;
+                    chatInput.value = '';
+                } catch (error) {
+                    alert('发送失败：' + error.message);
+                }
+            });
+
+            // 回车发送
+            chatInput.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter') chatSendBtn.click();
+            });
+
+            // 打字流（防抖）
+            let typingTimer = null;
+            chatInput.addEventListener('input', () => {
+                clearTimeout(typingTimer);
+                typingTimer = setTimeout(() => {
+                    if (chatApi._channel) {
+                        chatApi._channel.send({
+                            type: 'broadcast',
+                            event: 'typing',
+                            payload: { sender: currentUser.id, content: chatInput.value }
+                        });
+                    }
+                }, 300);
+            });
+        }
+
+        // ===== 启动 =====
+        init();
+    </script>
+</body>
+</html>
