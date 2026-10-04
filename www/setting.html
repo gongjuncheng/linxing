@@ -360,7 +360,7 @@
             const { data: { session } } = await supabase.auth.getSession();
             if (!session) {
                 // 未登录，跳回主页
-                window.location.href = '/index.html';
+                window.location.href = './index.html';
                 return;
             }
             currentUser = session.user;
@@ -530,12 +530,11 @@
 
         // ===== 返回 =====
         backBtn.addEventListener('click', () => {
-            window.location.href = '/index.html';
+            window.location.href = './index.html';
         });
 
         // ===== 启动 =====
         loadProfile();
     </script>
 </body>
-  </html>
-              
+</html>
