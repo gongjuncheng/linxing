@@ -3,6 +3,12 @@ name: 自动打包 APK（签名注入）
 on:
   push:
     branches: [ "main" ]
+  workflow_dispatch:
+
+# 同一分支只保留最后一次运行，避免连续提交触发大量重复任务
+concurrency:
+  group: apk-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   build:
@@ -18,40 +24,32 @@ jobs:
       - name: 安装依赖
         run: npm install
 
-      - name: 初始化 Capacitor 并添加安卓
-        run: |
-          npx cap init 邻星 com.linxing.app --web-dir=www
-          npx cap add android
+      - name: 同步 Web 资源到原生工程
+        run: npx cap sync android
 
-      # -------- 生成自定义图标（复制到 assets/） --------
+      # -------- 生成自定义图标（仅当存在 resources/icon.png 时） --------
       - name: 生成自定义图标
         run: |
-          echo "🔍 检查 resources/icon.png 是否存在..."
           if [ -f "resources/icon.png" ]; then
-            echo "✅ 找到 resources/icon.png，准备生成图标..."
+            echo "✅ 找到 resources/icon.png，生成图标..."
             mkdir -p assets
             cp resources/icon.png assets/icon.png
             npm install @capacitor/assets
             npx capacitor-assets generate --iconBackgroundColor '#fdf8f0' --splashBackgroundColor '#fdf8f0'
-            echo "📂 生成的 Android 图标文件夹："
-            ls -la android/app/src/main/res/mipmap-* || echo "（请检查图片尺寸是否为 1024x1024）"
           else
-            echo "❌ 未找到 resources/icon.png，将使用 Capacitor 默认图标。"
+            echo "ℹ️ 未找到 resources/icon.png，使用 Capacitor 默认图标。"
           fi
-
-      - name: 同步代码
-        run: npx cap sync
-
-      - name: 解码 keystore
-        env:
-          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
-        run: echo "$KEYSTORE_BASE64" | base64 -d > android/app/keystore.jks
 
       - name: 安装 JDK 17
         uses: actions/setup-java@v4
         with:
           distribution: 'zulu'
           java-version: '17'
+
+      - name: 解码 keystore
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+        run: echo "$KEYSTORE_BASE64" | base64 -d > android/app/keystore.jks
 
       - name: 构建 APK（签名注入）
         env:

@@ -64,7 +64,7 @@
         <!-- 极光 AppKey（与 capacitor.config.json 中 plugins.JPush.appKey 保持一致；此处可由 manifestPlaceholders 覆盖） -->
         <meta-data
             android:name="JPUSH_APPKEY"
-            android:value="YOUR_JPUSH_APPKEY"
+            android:value="91d4fb0e8d57ddc89c6b239e"
             tools:replace="android:value" />
         <!-- 极光渠道 -->
         <meta-data

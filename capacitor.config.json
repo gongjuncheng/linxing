@@ -8,7 +8,7 @@
   },
   "plugins": {
     "JPush": {
-      "appKey": "YOUR_JPUSH_APPKEY",
+      "appKey": "91d4fb0e8d57ddc89c6b239e",
       "channel": "default",
       "debugMode": false
     }
