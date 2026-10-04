@@ -139,6 +139,7 @@
             setupReadReceiptDialog,
             setupImagePreview
         } from './js/chat-ui.js';
+        import { initPush } from './js/push.js';
 
         // ===== DOM 元素 =====
         const chatBack = document.getElementById('chat-back');
@@ -189,6 +190,9 @@
                 return;
             }
             currentUser = user;
+
+            // 初始化极光推送（注册设备 + 设置别名）
+            initPush(currentUser);
 
             // 获取URL参数
             const params = getUrlParams();
