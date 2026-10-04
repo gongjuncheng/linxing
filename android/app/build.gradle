@@ -10,6 +10,19 @@ android {
         versionCode 1
         versionName "1.0"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
+        // 极光推送厂商通道凭证（占位，未配置厂商通道时留空即可；
+        // 接入具体厂商后在此填入对应 AppID/AppKey/AppSecret，或在 CI 用 manifestPlaceholders 注入）
+        manifestPlaceholders = [
+            XIAOMI_APPID   : "",
+            XIAOMI_APPKEY  : "",
+            OPPO_APPKEY    : "",
+            OPPO_APPID     : "",
+            OPPO_APPSECRET : "",
+            VIVO_APPKEY    : "",
+            VIVO_APPID     : "",
+            MEIZU_APPKEY   : "",
+            MEIZU_APPID    : ""
+        ]
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
              // Default: https://android.googlesource.com/platform/frameworks/base/+/282e181b58cf72b6ca770dc7ca5f91f135444502/tools/aapt/AaptAssets.cpp#61
