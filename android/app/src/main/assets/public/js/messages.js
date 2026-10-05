@@ -4,7 +4,7 @@
 // ============================================
 
 import { formatTime, isVideoExpired } from './ui-utils.js';
-import { loadBurnAgreement, loadReadReceiptAgreement } from './agreements.js';
+import { supabase } from './supabase.js';
 
 /**
  * 渲染文本消息
@@ -108,7 +108,7 @@ export async function renderSystemMessage(msg, currentUserId, container, onAgree
     div.className = 'msg system';
     div.dataset.msgId = msg.id;
 
-    // 提取约定ID（真实数据库主键，UUID 格式）
+    // 提取约定ID（真实数据库主键，整数格式）
     const agreementIdMatch = msg.content.match(/约定ID[：:]\s*([0-9a-fA-F-]+)/);
     const agreementId = agreementIdMatch ? agreementIdMatch[1] : null;
     const type = msg.system_type === 'burn_agreement' ? 'burn' : 'read_receipt';
@@ -116,28 +116,43 @@ export async function renderSystemMessage(msg, currentUserId, container, onAgree
     // 约定请求由对方发起（from_user_id），只有「接收方」（to_user_id === 当前用户）才能同意/拒绝
     const iAmRecipient = msg.to_user_id === currentUserId;
 
-    // 解析约定当前状态：已非 pending（已同意/已拒绝/已撤销）则只展示结果，不再显示操作按钮
+    // 直接按主键 id 查约定状态（最稳健，避免 from/to 推断与 id 类型不匹配）
+    // - 查到且为 accepted/rejected/revoked → 仅展示结果
+    // - 查到且为 pending，或查询出错 → 乐观显示按钮
+    // - 行不存在（旧数据残留）→ 不显示按钮，避免点到无意义的死按钮
     let agreementStatus = null;
+    let agreementNotFound = false;
     if (agreementId && iAmRecipient) {
         try {
-            const ag = type === 'burn'
-                ? await loadBurnAgreement(msg.from_user_id)
-                : await loadReadReceiptAgreement(msg.from_user_id);
-            if (ag && ag.id === agreementId) agreementStatus = ag.status;
+            const table = type === 'burn' ? 'burn_agreements' : 'read_receipt_agreements';
+            const { data: ag, error } = await supabase
+                .from(table)
+                .select('id, status')
+                .eq('id', agreementId)
+                .maybeSingle();
+            if (error) {
+                agreementStatus = null; // 查询出错，乐观显示按钮
+            } else if (ag) {
+                agreementStatus = ag.status;
+            } else {
+                agreementNotFound = true; // 行不存在（旧数据）
+            }
         } catch (e) {
-            // 忽略查询异常，退化为显示按钮
+            // 忽略异常，乐观显示按钮
         }
     }
 
+    const finalized = agreementStatus === 'accepted' || agreementStatus === 'rejected' || agreementStatus === 'revoked';
+
     let actions = '';
-    if (agreementId && iAmRecipient && agreementStatus === 'pending') {
+    if (agreementId && iAmRecipient && !agreementNotFound && !finalized) {
         actions = `
             <div class="system-actions" data-msg-id="${msg.id}" data-agreement-id="${agreementId}" data-type="${type}">
                 <button class="small success agree-agreement">同意</button>
                 <button class="small danger reject-agreement">拒绝</button>
             </div>
         `;
-    } else if (agreementId && iAmRecipient && agreementStatus && agreementStatus !== 'pending') {
+    } else if (agreementId && iAmRecipient && agreementStatus) {
         const label = agreementStatus === 'accepted' ? '✅ 已同意'
             : agreementStatus === 'rejected' ? '❌ 已拒绝' : '↩️ 已撤销';
         actions = `
