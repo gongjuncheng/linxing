@@ -2,8 +2,8 @@
 //  邻星 · 常量配置
 // ============================================
 
-// ImgBB API Key 已迁移至服务端代理函数 upload-image（云端环境变量 IMGBB_API_KEY），
-// 客户端不再持有明文密钥，避免泄露。图片上传见 media.js 的 uploadImage。
+// ImgBB API Key（明文，按用户要求直接使用，不上传至 Storage 桶）
+export const IMGBB_API_KEY = '67f9328df38f59577a71f28c4ac141db';
 
 // 中国省份城市数据（用于注册和设置页面）
 export const chinaData = {
