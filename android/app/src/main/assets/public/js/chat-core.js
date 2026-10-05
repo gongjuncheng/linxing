@@ -127,12 +127,14 @@ export async function loadMessages(friendId, container) {
  * - 阅后即焚独立生效：接收方看到的 is_burn 消息，会在 burn_seconds 后真正删除
  */
 export async function markMessagesRead(friendId, userId) {
-    // 1) 阅后即焚：所有「发给我的 is_burn 消息」都安排删除（无论是否已读），
-    //    这样每次打开聊天都会重新安排，避免离开后定时器被清导致永久残留。
+    // 1) 阅后即焚：仅当前会话（from_user_id = friendId）发给我的 is_burn 消息才安排删除。
+    //    ⚠️ 必须按 from_user_id 过滤，否则打开任一聊天会把「所有好友」的焚毁消息
+    //       标记为已读并触发服务端删除（跨会话数据丢失）。
     const { data: myBurn } = await supabase
         .from('messages')
         .select('id, burn_seconds')
         .eq('to_user_id', userId)
+        .eq('from_user_id', friendId)
         .eq('is_burn', true);
 
     if (myBurn && myBurn.length) {
@@ -150,8 +152,7 @@ export async function markMessagesRead(friendId, userId) {
     const { data: readAgreement } = await supabase
         .from('read_receipt_agreements')
         .select('status')
-        .or(`user_id.eq.${userId},friend_id.eq.${userId}`)
-        .eq('friend_id', friendId)
+        .or(`and(user_id.eq.${userId},friend_id.eq.${friendId}),and(user_id.eq.${friendId},friend_id.eq.${userId})`)
         .maybeSingle();
 
     if (readAgreement && readAgreement.status === 'accepted') {

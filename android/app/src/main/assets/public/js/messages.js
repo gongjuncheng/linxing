@@ -1,10 +1,25 @@
 // ============================================
 //  邻星 · 消息渲染模块
 //  渲染各类消息（文本、图片、视频、小纸条、系统消息）
+//  安全约束：所有来自对方（不可信）的动态文本必须转义，禁止 innerHTML 拼接。
 // ============================================
 
 import { formatTime, isVideoExpired } from './ui-utils.js';
 import { supabase } from './supabase.js';
+
+/**
+ * 转义 HTML 特殊字符，防止存储型 XSS。
+ * 用于所有需要放进 innerHTML / 属性中的不可信文本（消息内容、媒体 URL 等）。
+ */
+function escapeHtml(s) {
+    return String(s ?? '').replace(/[&<>"']/g, (c) => ({
+        '&': '&amp;',
+        '<': '&lt;',
+        '>': '&gt;',
+        '"': '&quot;',
+        "'": '&#39;'
+    }[c]));
+}
 
 /**
  * 渲染文本消息
@@ -17,7 +32,8 @@ export function renderTextMessage(msg, currentUserId, container, readReceipt = f
     div.className = `msg ${msg.from_user_id === currentUserId ? 'sent' : 'received'}`;
     div.dataset.msgId = msg.id;
 
-    let contentHtml = msg.content || '';
+    // 消息内容来自对方，必须转义
+    let contentHtml = escapeHtml(msg.content || '');
     if (msg.is_burn) {
         if (msg.from_user_id === currentUserId) {
             contentHtml += `<span class="burn-badge">🔥 ${msg.burn_seconds}s 后焚毁</span>`;
@@ -32,7 +48,7 @@ export function renderTextMessage(msg, currentUserId, container, readReceipt = f
             : `<span class="read-status unread">未读</span>`;
     }
 
-    div.innerHTML = `${contentHtml}<span class="time">${formatTime(msg.created_at)}</span>`;
+    div.innerHTML = `${contentHtml}<span class="time">${escapeHtml(formatTime(msg.created_at))}</span>`;
     container.insertBefore(div, container.querySelector('.typing-bubble'));
     return div;
 }
@@ -53,10 +69,11 @@ export function renderStickerMessage(sticker, currentUserId, container) {
         readStatus = `<span class="read-status">✓ 已读</span>`;
     }
 
+    // sticker.content 来自对方，必须转义
     div.innerHTML = `
         <span class="sticker-label">📝 小纸条</span>
-        ${sticker.content}
-        <span class="time">${formatTime(sticker.created_at)}</span>
+        ${escapeHtml(sticker.content)}
+        <span class="time">${escapeHtml(formatTime(sticker.created_at))}</span>
         ${readStatus}
     `;
     container.insertBefore(div, container.querySelector('.typing-bubble'));
@@ -65,6 +82,7 @@ export function renderStickerMessage(sticker, currentUserId, container) {
 
 /**
  * 渲染媒体消息（图片/视频）
+ * 图片 URL 通过 setAttribute 赋值（而非字符串拼进属性），并改用 addEventListener 预览，避免注入。
  */
 export function renderMediaMessage(msg, currentUserId, container, expired = false) {
     const existing = container.querySelector(`[data-msg-id="${msg.id}"]`);
@@ -74,28 +92,53 @@ export function renderMediaMessage(msg, currentUserId, container, expired = fals
     div.className = `msg ${msg.from_user_id === currentUserId ? 'sent' : 'received'} media`;
     div.dataset.msgId = msg.id;
 
-    let mediaHtml = '';
+    let mediaNode = null;
     if (expired || (msg.media_type === 'video' && isVideoExpired(msg.created_at))) {
-        mediaHtml = `
-            <div class="media-expired">
-                <div class="icon">📎</div>
-                <span>文件已过期</span>
-            </div>
-        `;
+        const expiredBox = document.createElement('div');
+        expiredBox.className = 'media-expired';
+        const icon = document.createElement('div');
+        icon.className = 'icon';
+        icon.textContent = '📎';
+        const label = document.createElement('span');
+        label.textContent = '文件已过期';
+        expiredBox.appendChild(icon);
+        expiredBox.appendChild(label);
+        mediaNode = expiredBox;
     } else if (msg.media_type === 'image') {
-        mediaHtml = `<img src="${msg.media_url}" alt="图片" onclick="window.previewImage('${msg.media_url}')" />`;
+        const img = document.createElement('img');
+        img.alt = '图片';
+        // 用 setAttribute 赋值 URL，避免引号注入
+        img.setAttribute('src', msg.media_url || '');
+        img.addEventListener('click', () => {
+            if (typeof window.previewImage === 'function') window.previewImage(msg.media_url);
+        });
+        mediaNode = img;
     } else if (msg.media_type === 'video') {
-        mediaHtml = `<video controls preload="metadata"><source src="${msg.media_url}" /></video>`;
+        const video = document.createElement('video');
+        video.controls = true;
+        video.preload = 'metadata';
+        const source = document.createElement('source');
+        source.setAttribute('src', msg.media_url || '');
+        video.appendChild(source);
+        mediaNode = video;
     }
 
-    let burnHtml = '';
+    if (mediaNode) div.appendChild(mediaNode);
+
     if (msg.is_burn) {
-        burnHtml = msg.from_user_id === currentUserId
-            ? `<span class="burn-badge">🔥 ${msg.burn_seconds}s 后焚毁</span>`
-            : `<span class="burn-badge burn-incoming">🔥 阅后即焚 · ${msg.burn_seconds}s</span>`;
+        const burn = document.createElement('span');
+        burn.className = msg.from_user_id === currentUserId ? 'burn-badge' : 'burn-badge burn-incoming';
+        burn.textContent = msg.from_user_id === currentUserId
+            ? `🔥 ${msg.burn_seconds}s 后焚毁`
+            : `🔥 阅后即焚 · ${msg.burn_seconds}s`;
+        div.appendChild(burn);
     }
 
-    div.innerHTML = `${mediaHtml}${burnHtml}<span class="time">${formatTime(msg.created_at)}</span>`;
+    const time = document.createElement('span');
+    time.className = 'time';
+    time.textContent = formatTime(msg.created_at);
+    div.appendChild(time);
+
     container.insertBefore(div, container.querySelector('.typing-bubble'));
     return div;
 }
@@ -165,10 +208,11 @@ export async function renderSystemMessage(msg, currentUserId, container, onAgree
         `;
     }
 
+    // msg.content 来自对方，必须转义
     div.innerHTML = `
-        <div class="system-content">${msg.content}</div>
+        <div class="system-content">${escapeHtml(msg.content)}</div>
         ${actions}
-        <span class="time">${formatTime(msg.created_at)}</span>
+        <span class="time">${escapeHtml(formatTime(msg.created_at))}</span>
     `;
 
     container.insertBefore(div, container.querySelector('.typing-bubble'));
@@ -176,14 +220,14 @@ export async function renderSystemMessage(msg, currentUserId, container, onAgree
     // 绑定按钮事件
     div.querySelectorAll('.agree-agreement').forEach(btn => {
         btn.addEventListener('click', () => {
-            const container = btn.closest('.system-actions');
-            if (onAgree) onAgree(container.dataset.agreementId, container.dataset.type);
+            const el = btn.closest('.system-actions');
+            if (onAgree) onAgree(el.dataset.agreementId, el.dataset.type);
         });
     });
     div.querySelectorAll('.reject-agreement').forEach(btn => {
         btn.addEventListener('click', () => {
-            const container = btn.closest('.system-actions');
-            if (onReject) onReject(container.dataset.agreementId, container.dataset.type);
+            const el = btn.closest('.system-actions');
+            if (onReject) onReject(el.dataset.agreementId, el.dataset.type);
         });
     });
 
