@@ -9,7 +9,7 @@ import { supabase } from './supabase.js';
 /**
  * 渲染文本消息
  */
-export function renderTextMessage(msg, currentUserId, container) {
+export function renderTextMessage(msg, currentUserId, container, readReceipt = false) {
     const existing = container.querySelector(`[data-msg-id="${msg.id}"]`);
     if (existing) return;
 
@@ -25,8 +25,11 @@ export function renderTextMessage(msg, currentUserId, container) {
             contentHtml += `<span class="burn-badge burn-incoming">🔥 阅后即焚 · ${msg.burn_seconds}s</span>`;
         }
     }
-    if (msg.is_read && msg.from_user_id !== currentUserId) {
-        contentHtml += `<span class="read-status">✓ 已读</span>`;
+    // 已读回执：仅在我「发出」的消息上展示「对方是否已读」（约定生效时）
+    if (msg.from_user_id === currentUserId && readReceipt) {
+        contentHtml += msg.is_read
+            ? `<span class="read-status">✓ 已读</span>`
+            : `<span class="read-status unread">未读</span>`;
     }
 
     div.innerHTML = `${contentHtml}<span class="time">${formatTime(msg.created_at)}</span>`;

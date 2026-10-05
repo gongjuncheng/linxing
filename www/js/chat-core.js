@@ -4,7 +4,7 @@
 // ============================================
 
 import { supabase } from './supabase.js';
-import { loadBurnAgreement, handleBurnAgreement, handleReadReceiptAgreement } from './agreements.js';
+import { loadBurnAgreement, loadReadReceiptAgreement, handleBurnAgreement, handleReadReceiptAgreement } from './agreements.js';
 import {
     renderTextMessage,
     renderStickerMessage,
@@ -102,6 +102,10 @@ export async function loadMessages(friendId, container) {
     ];
     all.sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
 
+    // 已读回执约定是否生效（用于在我发出的消息上展示「已读/未读」）
+    const rr = await loadReadReceiptAgreement(friendId);
+    const readReceipt = !!(rr && rr.status === 'accepted');
+
     all.forEach(item => {
         if (item.is_sticker) {
             renderStickerMessage(item, user.id, container);
@@ -110,7 +114,7 @@ export async function loadMessages(friendId, container) {
         } else if (item.media_url) {
             renderMediaMessage(item, user.id, container, false);
         } else {
-            renderTextMessage(item, user.id, container);
+            renderTextMessage(item, user.id, container, readReceipt);
         }
     });
 
@@ -123,20 +127,26 @@ export async function loadMessages(friendId, container) {
  * - 阅后即焚独立生效：接收方看到的 is_burn 消息，会在 burn_seconds 后真正删除
  */
 export async function markMessagesRead(friendId, userId) {
-    // 1) 阅后即焚：找出「对方发给我、未读、且 is_burn」的消息，安排焚毁
-    const { data: unreadBurn } = await supabase
+    // 1) 阅后即焚：所有「发给我的 is_burn 消息」都安排删除（无论是否已读），
+    //    这样每次打开聊天都会重新安排，避免离开后定时器被清导致永久残留。
+    const { data: myBurn } = await supabase
         .from('messages')
         .select('id, burn_seconds')
         .eq('to_user_id', userId)
-        .eq('from_user_id', friendId)
-        .eq('is_read', false)
         .eq('is_burn', true);
 
-    if (unreadBurn && unreadBurn.length) {
-        unreadBurn.forEach(m => scheduleBurn(m, userId));
+    if (myBurn && myBurn.length) {
+        myBurn.forEach(m => scheduleBurn(m, userId));
+        // 标记为已读 -> 触发服务端延时删除触发器（即便客户端关闭也能真删）
+        const ids = myBurn.map(m => m.id);
+        const { error } = await supabase
+            .from('messages')
+            .update({ is_read: true, read_at: new Date().toISOString() })
+            .in('id', ids);
+        if (error) console.error('标记焚毁消息已读失败', error);
     }
 
-    // 2) 已读回执约定：生效时才标记 is_read（让发送方看到「已读」）
+    // 2) 已读回执约定：生效时才标记「普通消息」is_read（让发送方看到「已读」）
     const { data: readAgreement } = await supabase
         .from('read_receipt_agreements')
         .select('status')
@@ -150,7 +160,8 @@ export async function markMessagesRead(friendId, userId) {
             .update({ is_read: true, read_at: new Date().toISOString() })
             .eq('to_user_id', userId)
             .eq('from_user_id', friendId)
-            .eq('is_read', false);
+            .eq('is_read', false)
+            .eq('is_burn', false);
         if (error) console.error('标记已读失败', error);
     }
 }

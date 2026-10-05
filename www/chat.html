@@ -218,7 +218,7 @@
                     } else if (msg.is_system) {
                         renderSystemMessage(msg, currentUser.id, chatMessages, onAgreeAgreement, rejectAgreement);
                     } else {
-                        renderTextMessage(msg, currentUser.id, chatMessages);
+                        renderTextMessage(msg, currentUser.id, chatMessages, currentReadReceiptAgreement?.status === 'accepted');
                     }
                     chatMessages.scrollTop = chatMessages.scrollHeight;
                 },
@@ -478,7 +478,7 @@
 
                 try {
                     const msg = await sendMessage(friendId, content, isBurn, burnSeconds);
-                    renderTextMessage(msg, currentUser.id, chatMessages);
+                    renderTextMessage(msg, currentUser.id, chatMessages, currentReadReceiptAgreement?.status === 'accepted');
                     chatMessages.scrollTop = chatMessages.scrollHeight;
                     chatInput.value = '';
                 } catch (error) {
