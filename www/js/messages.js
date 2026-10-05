@@ -17,8 +17,12 @@ export function renderTextMessage(msg, currentUserId, container) {
     div.dataset.msgId = msg.id;
 
     let contentHtml = msg.content || '';
-    if (msg.is_burn && msg.from_user_id === currentUserId) {
-        contentHtml += `<span class="burn-badge">🔥 ${msg.burn_seconds}s</span>`;
+    if (msg.is_burn) {
+        if (msg.from_user_id === currentUserId) {
+            contentHtml += `<span class="burn-badge">🔥 ${msg.burn_seconds}s 后焚毁</span>`;
+        } else {
+            contentHtml += `<span class="burn-badge burn-incoming">🔥 阅后即焚 · ${msg.burn_seconds}s</span>`;
+        }
     }
     if (msg.is_read && msg.from_user_id !== currentUserId) {
         contentHtml += `<span class="read-status">✓ 已读</span>`;
@@ -80,7 +84,14 @@ export function renderMediaMessage(msg, currentUserId, container, expired = fals
         mediaHtml = `<video controls preload="metadata"><source src="${msg.media_url}" /></video>`;
     }
 
-    div.innerHTML = `${mediaHtml}<span class="time">${formatTime(msg.created_at)}</span>`;
+    let burnHtml = '';
+    if (msg.is_burn) {
+        burnHtml = msg.from_user_id === currentUserId
+            ? `<span class="burn-badge">🔥 ${msg.burn_seconds}s 后焚毁</span>`
+            : `<span class="burn-badge burn-incoming">🔥 阅后即焚 · ${msg.burn_seconds}s</span>`;
+    }
+
+    div.innerHTML = `${mediaHtml}${burnHtml}<span class="time">${formatTime(msg.created_at)}</span>`;
     container.insertBefore(div, container.querySelector('.typing-bubble'));
     return div;
 }
