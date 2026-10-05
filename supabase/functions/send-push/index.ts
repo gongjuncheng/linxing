@@ -1,16 +1,11 @@
-// 邻星 · 极光推送服务端 Edge Function
-// 由数据库触发器（新消息）调用，向接收方设备推送通知
-//
-// 部署：
-//   supabase functions deploy send-push
-//   supabase secrets set JPUSH_APP_KEY=xxxx JPUSH_MASTER_SECRET=yyyy
-//
-// 环境变量（Supabase 自动注入）：SUPABASE_URL、SUPABASE_SERVICE_ROLE_KEY
-
+// 邻星 · 极光推送服务端 Edge Function（长连接版，已去除厂商通道依赖）
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 
 const JPushAppKey = Deno.env.get('JPUSH_APP_KEY') ?? '';
 const JPushMasterSecret = Deno.env.get('JPUSH_MASTER_SECRET') ?? '';
+const SupabaseUrl = Deno.env.get('SUPABASE_URL') ?? '';
+// 兼容两种命名：部分项目用 SUPABASE_SECRET_KEYS，部分用 SUPABASE_SERVICE_ROLE_KEY
+const SupabaseKey = Deno.env.get('SUPABASE_SECRET_KEYS') ?? Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
 
 interface PushBody {
   toUserId: string;
@@ -24,20 +19,16 @@ Deno.serve(async (req) => {
     const { toUserId, fromUserId, content } = body;
 
     if (!toUserId) return json({ error: 'toUserId required' }, 400);
-    if (!JPushAppKey || !JPushMasterSecret) {
-      return json({ error: 'JPush 密钥未配置（请在 Supabase 设置 JPUSH_APP_KEY / JPUSH_MASTER_SECRET）' }, 500);
-    }
+    if (!JPushAppKey || !JPushMasterSecret) return json({ error: 'JPush 密钥未配置' }, 500);
+    if (!SupabaseKey) return json({ error: 'Supabase 密钥未配置（SUPABASE_SECRET_KEYS）' }, 500);
 
-    const supabaseAdmin = createClient(
-      Deno.env.get('SUPABASE_URL')!,
-      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
-    );
+    const supabaseAdmin = createClient(SupabaseUrl, SupabaseKey);
 
-    // 查询接收方设备 RegistrationID
-    const { data: devices } = await supabaseAdmin
+    const { data: devices, error: devErr } = await supabaseAdmin
       .from('devices')
       .select('registration_id')
       .eq('user_id', toUserId);
+    if (devErr) return json({ error: 'devices 查询失败: ' + devErr.message }, 500);
 
     const rids = (devices ?? [])
       .map((d: any) => d.registration_id)
@@ -47,7 +38,6 @@ Deno.serve(async (req) => {
       return json({ ok: true, skipped: 'no_devices', toUserId });
     }
 
-    // 取发送方昵称作为通知标题
     let title = '邻星';
     if (fromUserId) {
       const { data: prof } = await supabaseAdmin
@@ -74,7 +64,10 @@ Deno.serve(async (req) => {
             chatId: fromUserId ?? ''
           }
         }
-      }
+      },
+      // time_to_live: 离线消息在极光侧保留时长（秒）。
+      // 对方 App 不在线时消息先留存，待其联网/重新打开 App 时补送，避免丢消息。
+      options: { time_to_live: 86400 }
     };
 
     const auth = btoa(`${JPushAppKey}:${JPushMasterSecret}`);
