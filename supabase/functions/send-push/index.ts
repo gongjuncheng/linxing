@@ -4,8 +4,15 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 const JPushAppKey = Deno.env.get('JPUSH_APP_KEY') ?? '';
 const JPushMasterSecret = Deno.env.get('JPUSH_MASTER_SECRET') ?? '';
 const SupabaseUrl = Deno.env.get('SUPABASE_URL') ?? '';
-// 兼容两种命名：部分项目用 SUPABASE_SECRET_KEYS，部分用 SUPABASE_SERVICE_ROLE_KEY
-const SupabaseKey = Deno.env.get('SUPABASE_SECRET_KEYS') ?? Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
+// 线上存在两个密钥名，优先用标准 service_role key；若其值无效则回退到 SECRET_KEYS
+const KeyPrimary = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
+const KeyFallback = Deno.env.get('SUPABASE_SECRET_KEYS') ?? '';
+
+function adminClient(k: string) {
+  return createClient(SupabaseUrl, k, {
+    auth: { persistSession: false, autoRefreshToken: false },
+  });
+}
 
 interface PushBody {
   toUserId: string;
@@ -20,9 +27,14 @@ Deno.serve(async (req) => {
 
     if (!toUserId) return json({ error: 'toUserId required' }, 400);
     if (!JPushAppKey || !JPushMasterSecret) return json({ error: 'JPush 密钥未配置' }, 500);
-    if (!SupabaseKey) return json({ error: 'Supabase 密钥未配置（SUPABASE_SECRET_KEYS）' }, 500);
+    if (!KeyPrimary && !KeyFallback) return json({ error: 'Supabase 密钥未配置' }, 500);
 
-    const supabaseAdmin = createClient(SupabaseUrl, SupabaseKey);
+    // 探测可用密钥：优先 KeyPrimary，Invalid API key 等异常时回退 KeyFallback
+    let supabaseAdmin = adminClient(KeyPrimary || KeyFallback);
+    const probe = await supabaseAdmin.from('devices').select('registration_id').limit(1);
+    if (probe.error && KeyFallback && KeyPrimary !== KeyFallback) {
+      supabaseAdmin = adminClient(KeyFallback);
+    }
 
     const { data: devices, error: devErr } = await supabaseAdmin
       .from('devices')
