@@ -4,6 +4,7 @@
 // ============================================
 
 import { formatTime, isVideoExpired } from './ui-utils.js';
+import { loadBurnAgreement, loadReadReceiptAgreement } from './agreements.js';
 
 /**
  * 渲染文本消息
@@ -99,7 +100,7 @@ export function renderMediaMessage(msg, currentUserId, container, expired = fals
 /**
  * 渲染系统消息（约定）
  */
-export function renderSystemMessage(msg, currentUserId, container, onAgree, onReject) {
+export async function renderSystemMessage(msg, currentUserId, container, onAgree, onReject) {
     const existing = container.querySelector(`[data-msg-id="${msg.id}"]`);
     if (existing) return;
 
@@ -107,17 +108,41 @@ export function renderSystemMessage(msg, currentUserId, container, onAgree, onRe
     div.className = 'msg system';
     div.dataset.msgId = msg.id;
 
-    // 提取约定ID
-    const agreementIdMatch = msg.content.match(/约定ID[：:]\s*(\d+)/);
+    // 提取约定ID（真实数据库主键，UUID 格式）
+    const agreementIdMatch = msg.content.match(/约定ID[：:]\s*([0-9a-fA-F-]+)/);
     const agreementId = agreementIdMatch ? agreementIdMatch[1] : null;
     const type = msg.system_type === 'burn_agreement' ? 'burn' : 'read_receipt';
 
+    // 约定请求由对方发起（from_user_id），只有「接收方」（to_user_id === 当前用户）才能同意/拒绝
+    const iAmRecipient = msg.to_user_id === currentUserId;
+
+    // 解析约定当前状态：已非 pending（已同意/已拒绝/已撤销）则只展示结果，不再显示操作按钮
+    let agreementStatus = null;
+    if (agreementId && iAmRecipient) {
+        try {
+            const ag = type === 'burn'
+                ? await loadBurnAgreement(msg.from_user_id)
+                : await loadReadReceiptAgreement(msg.from_user_id);
+            if (ag && ag.id === agreementId) agreementStatus = ag.status;
+        } catch (e) {
+            // 忽略查询异常，退化为显示按钮
+        }
+    }
+
     let actions = '';
-    if (agreementId) {
+    if (agreementId && iAmRecipient && agreementStatus === 'pending') {
         actions = `
             <div class="system-actions" data-msg-id="${msg.id}" data-agreement-id="${agreementId}" data-type="${type}">
                 <button class="small success agree-agreement">同意</button>
                 <button class="small danger reject-agreement">拒绝</button>
+            </div>
+        `;
+    } else if (agreementId && iAmRecipient && agreementStatus && agreementStatus !== 'pending') {
+        const label = agreementStatus === 'accepted' ? '✅ 已同意'
+            : agreementStatus === 'rejected' ? '❌ 已拒绝' : '↩️ 已撤销';
+        actions = `
+            <div class="system-actions" data-agreement-id="${agreementId}" data-type="${type}">
+                <span class="agreement-result">${label}</span>
             </div>
         `;
     }
