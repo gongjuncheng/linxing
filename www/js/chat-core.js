@@ -1,9 +1,10 @@
 // ============================================
 //  邻星 · 聊天核心模块
-//  加载消息、发送消息、广播订阅、标记已读
+//  加载消息、发送消息、广播订阅、标记已读、阅后即焚
 // ============================================
 
 import { supabase } from './supabase.js';
+import { loadBurnAgreement } from './agreements.js';
 import {
     renderTextMessage,
     renderStickerMessage,
@@ -11,12 +12,17 @@ import {
     renderSystemMessage
 } from './messages.js';
 
+// Supabase 项目地址（用于调用 Edge Function）
+const SUPABASE_URL = 'https://tercpgsnqwhbxlwpsbeo.supabase.co';
+
 // ===== 状态 =====
 let currentChatUserId = null;
 let currentUserId = null;
+let currentContainer = null;   // 当前聊天消息容器，供焚毁时移除 DOM
 let typingChannel = null;
 let typingTimeout = null;
 let typingInputHandler = null;
+const burnTimers = {};         // messageId -> setTimeout 句柄，避免重复安排
 
 /**
  * 初始化聊天
@@ -24,6 +30,7 @@ let typingInputHandler = null;
 export function initChat(friendId, userId, container, options = {}) {
     currentChatUserId = friendId;
     currentUserId = userId;
+    currentContainer = container;
 
     const {
         onNewMessage,
@@ -45,7 +52,7 @@ export function initChat(friendId, userId, container, options = {}) {
         onTypingEnd
     });
 
-    // 标记已读
+    // 标记已读 + 安排阅后即焚
     markMessagesRead(friendId, userId);
 
     return {
@@ -66,6 +73,8 @@ export function initChat(friendId, userId, container, options = {}) {
 export async function loadMessages(friendId, container) {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return;
+
+    currentContainer = container;
 
     const [msgRes, stickerRes] = await Promise.all([
         supabase
@@ -109,10 +118,25 @@ export async function loadMessages(friendId, container) {
 }
 
 /**
- * 标记消息已读（仅在已读回执约定生效时）
+ * 标记消息已读 + 安排阅后即焚
+ * - 已读回执约定生效时，才把 is_read 标记给对方看
+ * - 阅后即焚独立生效：接收方看到的 is_burn 消息，会在 burn_seconds 后真正删除
  */
 export async function markMessagesRead(friendId, userId) {
-    // 检查是否有已读回执约定且生效
+    // 1) 阅后即焚：找出「对方发给我、未读、且 is_burn」的消息，安排焚毁
+    const { data: unreadBurn } = await supabase
+        .from('messages')
+        .select('id, burn_seconds')
+        .eq('to_user_id', userId)
+        .eq('from_user_id', friendId)
+        .eq('is_read', false)
+        .eq('is_burn', true);
+
+    if (unreadBurn && unreadBurn.length) {
+        unreadBurn.forEach(m => scheduleBurn(m, userId));
+    }
+
+    // 2) 已读回执约定：生效时才标记 is_read（让发送方看到「已读」）
     const { data: readAgreement } = await supabase
         .from('read_receipt_agreements')
         .select('status')
@@ -171,6 +195,10 @@ function subscribeToChannel(friendId, userId, handlers) {
 
         if (msg) {
             if (handlers.onNewMessage) handlers.onNewMessage(msg);
+            // 阅后即焚：接收方实时收到自己的未读焚毁消息，立即安排焚毁
+            if (msg.is_burn && msg.to_user_id === user.id) {
+                scheduleBurn({ id: msg.id, burn_seconds: msg.burn_seconds }, user.id);
+            }
         }
     });
 
@@ -197,6 +225,11 @@ function subscribeToChannel(friendId, userId, handlers) {
         if (handlers.onAgreementUpdate) handlers.onAgreementUpdate(payload);
     });
 
+    // 消息被焚毁删除：移除本地 DOM
+    typingChannel.on('broadcast', { event: 'message_deleted' }, ({ payload }) => {
+        removeMessageFromUI(payload.message_id);
+    });
+
     typingChannel.subscribe((status) => {
         console.log('📡 订阅状态:', status);
     });
@@ -206,10 +239,23 @@ function subscribeToChannel(friendId, userId, handlers) {
 
 /**
  * 发送文本消息
+ * 若为阅后即焚消息，必须双方已达成 accepted 的约定，否则降级为普通消息
  */
 export async function sendMessage(friendId, content, isBurn = false, burnSeconds = 0) {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) throw new Error('未登录');
+
+    // 约定校验：阅后即焚需双方同意
+    let effectiveBurn = isBurn;
+    let effectiveSeconds = burnSeconds;
+    if (effectiveBurn) {
+        const agreement = await loadBurnAgreement(friendId);
+        if (!agreement || agreement.status !== 'accepted') {
+            console.warn('未达成阅后即焚约定，已降级为普通消息');
+            effectiveBurn = false;
+            effectiveSeconds = 0;
+        }
+    }
 
     const { data: inserted, error } = await supabase
         .from('messages')
@@ -217,8 +263,8 @@ export async function sendMessage(friendId, content, isBurn = false, burnSeconds
             from_user_id: user.id,
             to_user_id: friendId,
             content: content,
-            is_burn: isBurn,
-            burn_seconds: burnSeconds,
+            is_burn: effectiveBurn,
+            burn_seconds: effectiveSeconds,
             is_read: false
         })
         .select()
@@ -243,6 +289,57 @@ export async function sendMessage(friendId, content, isBurn = false, burnSeconds
 }
 
 /**
+ * 安排阅后即焚：N 秒后真正删除该消息（数据库硬删），并通知对端移除
+ */
+function scheduleBurn(msg, userId) {
+    if (burnTimers[msg.id]) return; // 已安排，避免重复
+    const secs = Number(msg.burn_seconds) || 5;
+    burnTimers[msg.id] = setTimeout(async () => {
+        delete burnTimers[msg.id];
+        await deleteMessage(msg.id);
+        removeMessageFromUI(msg.id);
+        // 通知对端也移除
+        if (typingChannel) {
+            typingChannel.send({
+                type: 'broadcast',
+                event: 'message_deleted',
+                payload: { message_id: msg.id }
+            });
+        }
+    }, secs * 1000);
+}
+
+/**
+ * 从聊天界面移除某条消息节点
+ */
+function removeMessageFromUI(msgId) {
+    if (!currentContainer) return;
+    const el = currentContainer.querySelector(`[data-msg-id="${msgId}"]`);
+    if (el) el.remove();
+}
+
+/**
+ * 调用后端函数真正删除消息（service role 硬删，带归属校验）
+ */
+async function deleteMessage(msgId) {
+    try {
+        const { data: { session } } = await supabase.auth.getSession();
+        const token = session?.access_token;
+        if (!token) return;
+        await fetch(`${SUPABASE_URL}/functions/v1/delete-message`, {
+            method: 'POST',
+            headers: {
+                'Authorization': `Bearer ${token}`,
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ message_id: msgId })
+        });
+    } catch (e) {
+        console.error('焚毁删除失败', e);
+    }
+}
+
+/**
  * 清理聊天资源
  */
 export function cleanup() {
@@ -250,6 +347,11 @@ export function cleanup() {
         typingChannel.unsubscribe();
         typingChannel = null;
     }
+    // 清空未触发的焚毁定时器
+    Object.keys(burnTimers).forEach(id => {
+        clearTimeout(burnTimers[id]);
+        delete burnTimers[id];
+    });
     if (typingInputHandler) {
         // 由调用方移除事件监听
     }
