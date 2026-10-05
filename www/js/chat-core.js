@@ -4,7 +4,7 @@
 // ============================================
 
 import { supabase } from './supabase.js';
-import { loadBurnAgreement } from './agreements.js';
+import { loadBurnAgreement, handleBurnAgreement, handleReadReceiptAgreement } from './agreements.js';
 import {
     renderTextMessage,
     renderStickerMessage,
@@ -106,7 +106,7 @@ export async function loadMessages(friendId, container) {
         if (item.is_sticker) {
             renderStickerMessage(item, user.id, container);
         } else if (item.is_system) {
-            renderSystemMessage(item, user.id, container);
+            renderSystemMessage(item, user.id, container, onAgreeAgreement, rejectAgreement);
         } else if (item.media_url) {
             renderMediaMessage(item, user.id, container, false);
         } else {
@@ -356,3 +356,40 @@ export function cleanup() {
         // 由调用方移除事件监听
     }
 }
+
+// ===== 系统消息「同意 / 拒绝」约定按钮回调 =====
+// 与 chat.html 中的 handleAgreementAction 等价，但点击即生效（不二次确认），
+// 用于历史加载消息的渲染（loadMessages）以及对外统一暴露。
+async function resolveAgreement(agreementId, type, action) {
+    if (!agreementId) return;
+    try {
+        if (type === 'burn') {
+            await handleBurnAgreement(agreementId, action);
+        } else if (type === 'read_receipt') {
+            await handleReadReceiptAgreement(agreementId, action);
+        }
+    } catch (e) {
+        console.error('处理约定失败', e);
+        alert('操作失败：' + (e?.message || e));
+        return;
+    }
+    // 更新该条系统消息的按钮区域为结果
+    if (currentContainer) {
+        currentContainer
+            .querySelectorAll(`.system-actions[data-agreement-id="${agreementId}"]`)
+            .forEach(el => {
+                el.innerHTML = `<span class="agreement-result">${action === 'agree' ? '✅ 已同意' : '❌ 已拒绝'}</span>`;
+            });
+    }
+    // 广播对端，触发其状态刷新
+    if (typingChannel) {
+        typingChannel.send({
+            type: 'broadcast',
+            event: 'agreement_update',
+            payload: { agreementId, type, action }
+        });
+    }
+}
+
+export const onAgreeAgreement = (id, type) => resolveAgreement(id, type, 'agree');
+export const rejectAgreement = (id, type) => resolveAgreement(id, type, 'reject');
